@@ -205,7 +205,7 @@ function App() {
               setPretrainedExpression(expressionResult);
               
               // Render expression heatmap
-              if (showExpressionHeatmap && canvasRef.current) {
+              if (showExpressionHeatmap && canvasRef.current && videoRef.current) {
                 renderExpressionHeatmap(
                   canvasRef.current,
                   videoRef.current,
