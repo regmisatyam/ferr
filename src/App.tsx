@@ -168,7 +168,6 @@ function App() {
 
   // Process video frames
   const startProcessing = () => {
-    let lastTime = performance.now();
     let frameCount = 0;
     let fpsLastUpdate = performance.now();
 
@@ -198,7 +197,7 @@ function App() {
         setTensionScore(tension);
         
         // Detect expressions using pre-trained model (throttled to every 200ms)
-        if (recognitionReady && now - lastRecognitionUpdate.current > 200) {
+        if (recognitionReady && videoRef.current && now - lastRecognitionUpdate.current > 200) {
           lastRecognitionUpdate.current = now;
           
           detectExpressions(videoRef.current).then(expressionResult => {
@@ -259,6 +258,7 @@ function App() {
               if (autoTrain && 
                   expressionResult.confidence > 0.7 && 
                   currentLandmarks &&
+                  videoRef.current &&
                   now - lastAutoTrainUpdate.current > 2000) {
                 lastAutoTrainUpdate.current = now;
                 

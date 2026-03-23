@@ -14,13 +14,6 @@ const RIGHT_BROW = 300;
 const CHIN = 152;
 const NOSE_TIP = 0;
 
-function euclideanDistance(p1: Landmark, p2: Landmark): number {
-  const dx = p1.x - p2.x;
-  const dy = p1.y - p2.y;
-  const dz = p1.z - p2.z;
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
-}
-
 function euclideanDistance2D(p1: Landmark, p2: Landmark): number {
   const dx = p1.x - p2.x;
   const dy = p1.y - p2.y;

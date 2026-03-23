@@ -5,7 +5,8 @@ export function logPrediction(
   features: number[],
   source: string
 ): void {
-  if (process.env.NODE_ENV === 'development') {
+  const isDev = import.meta.env.DEV;
+  if (isDev) {
     console.log(`[${source}] Prediction:`, {
       label: prediction.label,
       confidence: (prediction.confidence * 100).toFixed(1) + '%',
@@ -24,7 +25,8 @@ export function logTraining(
   sampleCount: number,
   source: string
 ): void {
-  if (process.env.NODE_ENV === 'development') {
+  const isDev = import.meta.env.DEV;
+  if (isDev) {
     console.log(`[${source}] Training:`, {
       label,
       featureCount: features.length,

@@ -13,7 +13,7 @@ const EMOTION_COLORS: Record<string, [number, number, number]> = {
 
 export function renderExpressionHeatmap(
   canvas: HTMLCanvasElement,
-  videoElement: HTMLVideoElement,
+  _videoElement: HTMLVideoElement,
   expressions: FaceExpressions | null
 ): void {
   const ctx = canvas.getContext('2d');
@@ -87,7 +87,6 @@ export function renderExpressionBars(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  const width = canvas.width;
   const height = canvas.height;
   const barHeight = 20;
   const padding = 10;

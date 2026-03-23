@@ -1,4 +1,4 @@
-import { EmotionLabel, ClassifierState, Prediction, TrainingSample } from '../types';
+import { EmotionLabel, ClassifierState, Prediction } from '../types';
 import { saveClassifierState, loadClassifierState } from '../storage/indexedDb';
 
 const EMOTION_LABELS: EmotionLabel[] = ['Neutral', 'Happy', 'Angry', 'Sad', 'Surprise', 'Fear', 'Disgust'];
@@ -11,12 +11,10 @@ export class OnlineSoftmaxClassifier {
   private sampleCounts: Record<EmotionLabel, number>;
   private numFeatures: number;
   private numClasses: number;
-  private useHybridFeatures: boolean;
 
-  constructor(numFeatures: number, useHybridFeatures: boolean = false) {
+  constructor(numFeatures: number, _useHybridFeatures: boolean = false) {
     this.numFeatures = numFeatures;
     this.numClasses = EMOTION_LABELS.length;
-    this.useHybridFeatures = useHybridFeatures;
     
     // Initialize weights and bias to small random values
     this.weights = Array(this.numClasses)
