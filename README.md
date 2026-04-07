@@ -1,294 +1,199 @@
-# Face Expression + Tension Heatmap + Face Recognition + Continual Learning
+# Face Expression, Tension, Recognition, and Continual Learning
 
-A comprehensive client-side browser application that performs real-time face expression analysis, facial tension visualization, face recognition, and continual learning using webcam input. Features both geometric and deep learning-based face analysis with hybrid model capabilities.
+This is a browser-based application that performs real-time face analysis entirely on your device using your webcam. It detects facial expressions, visualizes facial tension as a heatmap, recognizes registered individuals, and learns incrementally from the labels you provide. An optional AI interview feature lets you explore emotional authenticity by comparing what you say with what your face reveals.
 
-## Features
+No backend server is required. All face processing happens locally in your browser. The only outbound connection is to the Cerebras API if you choose to run the AI interview.
 
-### 1. **Webcam Face Detection**
-- Uses MediaPipe Tasks Vision FaceLandmarker for detecting 468/478 facial landmarks
-- Real-time video processing at 30 FPS
-- No backend required - runs entirely in the browser
+---
 
-### 2. **Geometric Feature Extraction**
-The app computes 11 numeric features from facial landmarks:
-- **Left & Right EAR (Eye Aspect Ratio)**: Measures eye openness
-- **MAR (Mouth Aspect Ratio)**: Measures mouth opening
-- **Smile Curvature**: Detects smile intensity
-- **Eyebrow Heights**: Left and right eyebrow elevation
-- **Inter-Ocular Distance**: Distance between eyes (for normalization)
-- **Eye Openness Asymmetry**: Difference between left and right eye openness
-- **Mouth Width**: Horizontal mouth dimension
-- **Jaw Opening**: Vertical jaw displacement
-- **Head Tilt Angle**: Head rotation angle
+## What the Project Does
 
-### 3. **Baseline Capture & Tension Heatmap**
-- **Capture Baseline**: Press "Capture Neutral Baseline" to collect 30 frames of your neutral expression
-- **Tension Visualization**: Real-time heatmap overlay showing per-landmark tension (deviation from baseline)
-- **Tension Score**: 0-100 metric indicating overall facial tension
-- **Colormap**: Jet colormap (blue → green → yellow → red) for intuitive visualization
+The application has four interconnected capabilities:
 
-### 4. **Continual Learning**
-- **Label Expressions**: Click emotion buttons (Neutral, Happy, Angry, Sad, Surprise, Fear, Disgust) to label your current expression
-- **Incremental Classifier**: Online softmax regression that updates immediately with each labeled sample
-- **Persistent Learning**: Model weights and training data stored in IndexedDB, survives page refreshes
-- **Real-time Prediction**: Shows predicted emotion with confidence scores and probability distribution
+**Expression Recognition.** The app extracts geometric features from your facial landmarks and uses a small softmax classifier that you train yourself. You make an expression, click the emotion button that matches it, and the classifier updates immediately. The more you label, the more accurate it becomes. You can also optionally combine these hand-crafted features with deep face descriptors from a pre-trained neural network, which often improves accuracy.
 
-### 5. **Face Recognition with Continual Learning**
-- **Face Registration**: Register faces with names for identification
-- **Real-time Recognition**: Identifies registered individuals with confidence scores
-- **Auto-Improvement**: Automatically adds new samples when recognition is confident (>85%)
-- **Multi-Sample Learning**: Stores up to 10 descriptors per person for robust recognition
-- **128-D Face Descriptors**: Uses face-api.js with FaceRecognitionNet for deep face embeddings
-- **Persistent Storage**: All registered faces saved in IndexedDB
+**Facial Tension Heatmap.** After you capture a neutral baseline (about three seconds of your relaxed face), the app continuously measures how far each facial landmark has moved from that baseline and renders this as a color-coded heatmap overlaid on your face. The overall deviation is summarized as a tension score from 0 to 100.
 
-### 6. **Hybrid Model Architecture**
-- **Geometric Features**: 11 hand-crafted facial geometry features (EAR, MAR, etc.)
-- **Deep Features**: 128-dimensional face recognition descriptors (compressed to 20-D)
-- **Hybrid Mode**: Combines both feature types for improved emotion recognition
-- **Dynamic Switching**: Toggle between geometric-only and hybrid models
-- **Model Adaptation**: Automatically resizes classifier when switching modes
+**Face Recognition.** You can register your face (or multiple people's faces) with a name. The app then identifies those people in real time using 128-dimensional face embeddings from a pre-trained recognition network. Recognition improves automatically: whenever the system is confident it has recognized someone (above 85% confidence), it saves that frame's descriptor as a new training sample, up to ten descriptors per person.
 
-### 7. **Data Management**
-- **Export Data**: Download all training data, baseline, registered faces, and model weights as JSON
-- **Import Data**: Load previously exported data to continue learning
-- **Reset Learning**: Clear all emotion training data and reset the model
-- **Reset Face Recognition**: Delete all registered faces
+**AI Interview.** Powered by the Cerebras Cloud API and the Llama 3.1 8B model, this feature conducts a short structured interview. The AI generates five probing questions. For each response, the app records what you said, your detected facial expression, your tension score, and an optional screenshot. If your trained emotion classifier disagrees with the pre-trained expression detector during a response, the system may insert a follow-up question to probe the apparent inconsistency. At the end, the AI analyzes the full session and produces a JSON report covering emotional authenticity, stress indicators, emotional stability, key findings, and recommendations.
 
-### 8. **Debug Mode**
-- Toggle to visualize landmark points and indices for verification
-- Useful for understanding which facial points are being tracked
+---
 
-## Installation & Setup
+## Research Context
 
-### Prerequisites
-- Node.js (v18 or higher)
-- Modern web browser with WebGL support
+This project is a practical demonstration of several machine learning ideas applied together in a real-time, client-side system:
 
-### Install Dependencies
+**Online continual learning.** The emotion classifier never trains on batches offline. It updates its weights one sample at a time via gradient descent each time you click a label. This is incremental learning in the truest sense.
+
+**Transfer learning.** Rather than training a face recognition network from scratch, the app uses a pre-trained FaceRecognitionNet to produce rich 128-dimensional embeddings. These descriptors are reused both for face identity and (in hybrid mode) as additional features for emotion recognition.
+
+**Feature fusion.** The hybrid model combines 11 hand-crafted geometric features (eye aspect ratios, mouth shape, brow heights, jaw opening, head tilt) with 20 compressed dimensions from the 128-D face descriptor, for a total of 31 features. Combining interpretable geometry with deep representations often outperforms either alone.
+
+**Self-supervised improvement.** Face recognition improves without manual labels: high-confidence detections automatically supply new training samples. This is a form of pseudo-labeling or self-training running continuously in the background.
+
+**Emotion-aware interviewing.** The AI interview demonstrates how a language model can adapt its questioning strategy based on physiological signals. When detected facial emotion conflicts with the trained classifier's prediction, the system infers potential emotional incongruence and probes further. The resulting session report is structured JSON, making it suitable for downstream analysis in research contexts.
+
+---
+
+## Technology Stack
+
+The application is built with React 18 and TypeScript, bundled with Vite 5.
+
+Face landmark detection uses MediaPipe Tasks Vision FaceLandmarker, which returns 468 facial landmarks per frame and runs with GPU acceleration when available. Face recognition and expression detection use the vladmandic fork of face-api.js, which includes SSD face detection, a landmark model, FaceRecognitionNet, and faceExpressionNet. The incremental classifier is implemented from scratch using softmax regression with L2 regularization. All model weights and training data are persisted in IndexedDB so they survive page refreshes. The AI interview uses the official Cerebras Cloud SDK.
+
+---
+
+## Project Structure
+
+```
+src/
+  vision/
+    faceLandmarker.ts       MediaPipe integration and landmark detection
+  recognition/
+    faceRecognition.ts      Face-api.js integration, recognition logic, hybrid features
+  features/
+    features.ts             Geometric feature extraction (EAR, MAR, smile, brows, etc.)
+  heatmap/
+    heatmap.ts              Tension heatmap rendering with jet colormap
+    expressionHeatmap.ts    Pre-trained expression visualization
+  learning/
+    onlineSoftmax.ts        Incremental softmax regression classifier
+  storage/
+    indexedDb.ts            IndexedDB persistence for all models and data
+  ai/
+    cerebrasAgent.ts        Cerebras client: question generation, follow-ups, session analysis
+  audio/
+    speechRecognition.ts    Web Speech API integration for voice input
+  charts/
+    metricsChart.ts         Session metrics visualization for interview reports
+  types.ts                  Shared TypeScript types
+  App.tsx                   Main React component and application orchestration
+  main.tsx                  Entry point
+```
+
+---
+
+## Installation and Setup
+
+**Prerequisites.** Node.js version 18 or higher and a modern browser with WebGL support (Chrome 90+, Edge 90+, Firefox 88+, or Safari 15+). Camera access requires either HTTPS or localhost.
+
+**Install dependencies.**
+
 ```bash
 npm install
 ```
 
-### Run Development Server
+**Start the development server.**
+
 ```bash
 npm run dev
 ```
 
-The app will open at `http://localhost:5173` (or similar).
+The app opens at `http://localhost:5173` by default.
 
-### Build for Production
+**Build for production.**
+
 ```bash
 npm run build
 ```
 
-### Preview Production Build
+**Preview the production build.**
+
 ```bash
 npm run preview
 ```
 
-## Usage Guide
+---
 
-### Step 1: Start Camera
-1. Click "Start Camera" button
-2. Allow camera permissions when prompted
-3. Position your face in view (you should see landmarks detected)
+## How to Use
 
-### Step 2: Capture Baseline
-1. Make a neutral, relaxed expression
-2. Click "Capture Neutral Baseline"
-3. Hold still for ~3 seconds while 30 frames are collected
-4. The tension heatmap will now activate
+**Step 1: Start the camera.** Click the "Start Camera" button and allow camera permissions. You should see your face with landmark points detected.
 
-### Step 3: Register Your Face (Optional)
-1. Enter your name in the input field
-2. Click "Register Face" button
-3. Your face is now registered for recognition
-4. Register multiple people by entering different names
-5. The system learns continually - recognition improves over time
+**Step 2: Capture a neutral baseline.** Relax your face into a neutral expression and click "Capture Neutral Baseline." Hold still for about three seconds while 30 frames are collected. Once captured, the tension heatmap becomes active.
 
-### Step 4: Enable Hybrid Model (Optional)
-1. Check "Hybrid Model (Geo + Face)" checkbox
-2. This combines geometric features with face recognition descriptors
-3. Can improve emotion classification accuracy
-4. Slightly slower but more powerful
+**Step 3: Register your face (optional).** Type your name into the input field and click "Register Face." You can register multiple people by entering different names. The system will recognize them in subsequent sessions.
 
-### Step 5: Train the Emotion Classifier
-1. Make an expression (e.g., smile for "Happy")
-2. Click the corresponding emotion button
-3. Repeat for various expressions and emotions
-4. The model updates immediately with each label
-5. Watch as predictions improve with more training samples
+**Step 4: Enable hybrid mode (optional).** Check the "Hybrid Model (Geo + Face)" checkbox to combine geometric features with deep face descriptors. This can improve emotion classification accuracy, especially when expressions vary between individuals. It is slightly slower.
 
-### Step 6: Monitor Results
-- **Face Recognition**: Shows identified person with confidence
-- **Tension Score**: Shows how much your face deviates from baseline
-- **Emotion Prediction**: Displays predicted emotion with confidence
-- **Training Samples**: Shows count of labeled samples per emotion
+**Step 5: Train the emotion classifier.** Make an expression and click the corresponding emotion button (Neutral, Happy, Angry, Sad, Surprise, Fear, Disgust). Repeat for different expressions. The model updates after every single sample. Aim for at least five to ten samples per emotion for reliable predictions.
 
-### Step 7: Export/Import Data (Optional)
-- Use "Export Data" to save your training progress and registered faces
-- Use "Import Data" to restore from a previous export
-- Data is also automatically persisted in browser storage
+**Step 6: Run the AI interview (optional).** Click "Start AI Interview." You will be prompted to enter a Cerebras API key, which you can obtain for free at cloud.cerebras.ai. The AI will ask five questions. You can answer by typing or by using the voice input button if your browser supports it. Press Ctrl+Enter to submit each response. After the final question, the AI generates a full session report that you can download as JSON.
 
-## Technical Architecture
-
-### Project Structure
-```
-/src
-  /vision
-    faceLandmarker.ts      # MediaPipe FaceLandmarker integration (468 landmarks)
-  /recognition
-    faceRecognition.ts     # Face-api.js integration & recognition logic
-  /features
-    features.ts            # Geometric feature extraction (EAR, MAR, etc.)
-  /heatmap
-    heatmap.ts             # Heatmap rendering & Jet colormap
-  /learning
-    onlineSoftmax.ts       # Incremental softmax regression classifier
-  /storage
-    indexedDb.ts           # IndexedDB persistence layer
-  types.ts                 # TypeScript interfaces
-  App.tsx                  # Main React component with full UI
-  App.css                  # Styling
-  main.tsx                 # Entry point
-```
-
-### Key Technologies
-- **Vite**: Fast build tool and dev server
-- **React + TypeScript**: UI framework with type safety
-- **MediaPipe Tasks Vision**: 468-point face landmark detection
-- **face-api.js (@vladmandic/face-api)**: Face recognition with FaceRecognitionNet
-- **IndexedDB**: Client-side data persistence
-- **Canvas API**: Video processing and heatmap rendering
-
-### Algorithm Details
-
-#### Feature Extraction
-- **EAR Formula**: `(||p2-p6|| + ||p3-p5||) / (2*||p1-p4||)`
-  - Uses specific eye landmark indices for vertical/horizontal distances
-- **MAR Formula**: `||mouth_top-mouth_bottom|| / ||mouth_left-mouth_right||`
-- Features are normalized by inter-ocular distance for scale invariance
-
-#### Tension Computation
-1. Compute Euclidean distance between each current landmark and baseline landmark (in pixel space)
-2. Normalize distances to [0,1] using max tension in current frame
-3. Render as colored circles with blur for smooth heatmap
-4. Overall tension score = mean of normalized tensions × 100
-
-#### Face Recognition
-- **Algorithm**: FaceRecognitionNet (128-D descriptors)
-- **Matching**: Euclidean distance between descriptors
-- **Threshold**: 0.6 distance for positive match
-- **Continual Learning**: Stores multiple descriptors per person
-- **Auto-Improvement**: High-confidence recognitions (>85%) automatically add new samples
-- **Bounded Memory**: Keeps most recent 10 descriptors per person
-
-#### Hybrid Feature Fusion
-- **Geometric**: 11 features (EAR, MAR, angles, distances)
-- **Deep**: 20 compressed face descriptor dimensions (from 128-D)
-- **Total**: 31 hybrid features when enabled
-- **Adaptive**: Model weights resize automatically when switching modes
-
-#### Online Learning
-- **Algorithm**: Softmax regression (multinomial logistic regression)
-- **Update Rule**: Gradient descent with cross-entropy loss
-- **Learning Rate**: 0.05
-- **Regularization**: L2 with λ=0.001
-- **Weight Update**: `W -= lr * (gradient * features + λ * W)`
-- **Feature Flexibility**: Supports both 11-D geometric and 31-D hybrid features
-- Each labeled sample immediately updates weights via one-step gradient descent
-
-## Browser Compatibility
-- Chrome 90+ (recommended)
-- Edge 90+
-- Firefox 88+
-- Safari 15+
-
-**Note**: HTTPS or localhost required for camera access.
-
-## Performance Notes
-- Target: 30 FPS
-- Actual FPS displayed in stats panel
-- GPU acceleration enabled for MediaPipe when available
-- Heatmap blur may impact performance on slower devices
-
-## Troubleshooting
-
-### Camera Not Working
-- Ensure HTTPS or localhost
-- Check browser permissions
-- Try different browser if issues persist
-
-### "No Face Detected"
-- Ensure good lighting
-- Move closer to camera
-- Face camera directly
-- Avoid occlusions (hats, hands, etc.)
-
-### Low FPS
-- Close other tabs/applications
-- Reduce browser window size
-- Disable debug mode
-- Use newer hardware with GPU support
-
-### Model Not Learning
-- Ensure diverse expressions for each emotion
-- Collect at least 5-10 samples per emotion
-- Verify face is detected when labeling
-- Try enabling hybrid model for better accuracy
-
-### Face Recognition Not Working
-- Ensure good lighting and face camera directly
-- Register at least 1-2 samples per person
-- Recognition improves automatically with more exposures
-- Check that face detection is working (green border or debug mode)
-
-## Data Privacy
-- All processing happens client-side
-- No data sent to servers
-- Webcam feed never leaves your browser
-- Training data stored locally in IndexedDB
-- Export/import for manual data portability
-
-## License
-MIT License - Feel free to use and modify as needed.
-
-## Advanced Features
-
-### Continual Learning Explained
-This app implements true continual learning in two ways:
-
-1. **Emotion Recognition**: Each time you label an expression, the softmax classifier updates its weights immediately via gradient descent. No batch training needed - the model learns incrementally.
-
-2. **Face Recognition**: When the system recognizes you with high confidence (>85%), it automatically adds that frame's face descriptor as a new training sample. Over time, recognition accuracy improves without manual intervention.
-
-### Why Hybrid Models?
-- **Geometric features** are interpretable, fast, and work well for expressions
-- **Deep features** capture identity, subtle patterns, and texture information
-- **Combining both** often yields better emotion recognition, especially when expressions vary by person
-- Trade-off: Hybrid mode is slightly slower due to extra descriptor extraction
-
-### Model Persistence
-- All models and data stored in browser's IndexedDB
-- Survives page refreshes and browser restarts
-- Export/import for backup or transfer between devices
-- Each person's face gets multiple descriptors for robustness
-
-## Credits
-- Built with [MediaPipe](https://developers.google.com/mediapipe) for 468-point face landmark detection
-- Face recognition powered by [@vladmandic/face-api](https://github.com/vladmandic/face-api) (optimized fork)
-- Facial action unit indices based on [Face Mesh](https://github.com/google/mediapipe/blob/master/docs/solutions/face_mesh.md)
-- FaceRecognitionNet architecture from [face-recognition.js](https://github.com/justadudewhohacks/face-recognition.js)
-
-## Research Applications
-This app demonstrates several ML concepts:
-- **Online learning** (continual/incremental learning)
-- **Transfer learning** (using pre-trained face recognition)
-- **Feature fusion** (geometric + deep features)
-- **Multi-task learning** (identity + expression)
-- **Self-supervised improvement** (auto-labeling with confidence threshold)
+**Step 7: Export or import your data.** Use "Export Data" to save all training samples, model weights, baseline, and registered faces as a JSON file. Use "Import Data" to restore a previous export. Data is also automatically saved in the browser's IndexedDB, so it persists between sessions without any manual action.
 
 ---
 
-**Enjoy exploring facial expressions, recognition, and continual learning! 🎭📊🧠👤**
+## Algorithm Details
 
+**Geometric features.** Eleven features are extracted per frame: left and right eye aspect ratio (EAR), mouth aspect ratio (MAR), smile curvature, left and right eyebrow heights, inter-ocular distance, eye openness asymmetry, mouth width, jaw opening, and head tilt angle. All features are normalized by inter-ocular distance to be scale-invariant.
+
+EAR formula: (distance between vertical eye landmarks top-to-bottom on each side, summed) divided by (twice the horizontal eye width).
+
+MAR formula: vertical mouth opening divided by horizontal mouth width.
+
+**Tension computation.** For each of the 468 landmarks, the app computes the Euclidean distance between the current position and the baseline position captured during the neutral baseline step. These distances are normalized to the range 0 to 1 using the maximum deviation in the current frame. The result is rendered as a colored heatmap using the jet colormap (blue for low tension, green and yellow for moderate, red for high). The overall tension score is the mean normalized tension multiplied by 100.
+
+**Face recognition.** FaceRecognitionNet produces a 128-dimensional embedding for each detected face. Matching uses Euclidean distance with a threshold of 0.6. Up to ten descriptors are stored per person, keeping the most recent ones. Any detection above 85% confidence automatically appends a new descriptor sample.
+
+**Hybrid feature fusion.** The 128-D face descriptor is compressed to 20 dimensions by taking the first 20 values. These are concatenated with the 11 geometric features to form a 31-dimensional feature vector. The softmax classifier resizes its weight matrix automatically when you switch between geometric-only (11-D) and hybrid (31-D) modes.
+
+**Online softmax classifier.** This is multinomial logistic regression with immediate weight updates. For each labeled sample, the app computes the cross-entropy gradient and applies a single gradient descent step with learning rate 0.05 and L2 regularization coefficient 0.001. The weight update rule is: W = W minus learning-rate times (gradient times features plus lambda times W). There is no batch accumulation; the model updates on every single labeled sample.
+
+---
+
+## AI Interview: How It Works
+
+When you start an interview, the Cerebras agent generates five probing questions asking you to reflect on emotions, stress, and your current state. The questions are a mix of open-ended, scale, and yes/no formats.
+
+During each response the app records your answer text, the dominant expression detected by the pre-trained expression network, the confidence of that detection, and your facial tension score at the time you submitted.
+
+After you submit a response, the system compares the prediction from your user-trained classifier against the pre-trained expression reading. If they disagree and there is room in the question queue, the agent generates a follow-up question that acknowledges the apparent inconsistency and invites you to reflect on it.
+
+After all questions are answered, the agent receives the full transcript together with the sequence of detected emotions and generates a structured analysis. This analysis includes a dominant emotion, an emotional stability score, a stress level, an authenticity score (reflecting agreement between verbal content and facial expressions), key findings, and recommendations. If the API call fails for any reason, a local heuristic based on emotion counts provides a fallback report.
+
+The session report is available for download as a JSON file. A visual metrics chart is also generated and can be downloaded separately.
+
+---
+
+## Privacy
+
+All face processing happens locally in your browser. Your webcam feed is never sent anywhere. Training data, model weights, baseline frames, and face descriptors are stored in your browser's IndexedDB and never leave your device unless you explicitly export them.
+
+The only exception is the AI interview feature, which sends your text responses and detected emotion metadata to the Cerebras API for analysis. No images or raw video are sent; the screenshot embedded in the report is stored locally in the downloaded JSON file only.
+
+---
+
+## Performance Notes
+
+The app targets 30 frames per second. Actual FPS is displayed in the stats panel. GPU acceleration is enabled for MediaPipe when the browser supports it. The heatmap blur and face descriptor extraction are the most computationally intensive operations. On slower devices, you can disable the heatmap, turn off hybrid mode, or close other browser tabs to improve performance.
+
+---
+
+## Troubleshooting
+
+**Camera not working.** Make sure you are on localhost or an HTTPS URL. Check that the browser has camera permission. Try a different browser if needed.
+
+**No face detected.** Improve lighting, move closer to the camera, face the camera directly, and avoid anything covering your face.
+
+**Low FPS.** Close other applications, disable debug mode, or switch from hybrid to geometric-only mode.
+
+**Classifier not improving.** Collect at least five to ten samples per emotion with clearly distinct expressions. Make sure a face is actively detected when you click the label buttons. Enabling hybrid mode can help if geometric features alone are not separating emotions well.
+
+**Face recognition not working.** Register your face in good lighting facing the camera directly. Recognition accuracy improves automatically over multiple sessions as the system accumulates high-confidence observations.
+
+**AI interview fails to initialize.** Verify that your Cerebras API key is correct and that your account has remaining credits. Make sure you have an active internet connection.
+
+**Voice input not available.** Voice input relies on the Web Speech API, which is supported in Chrome, Edge, and Safari. Firefox does not support it. Type responses manually if voice input is unavailable.
+
+---
+
+## Credits
+
+Face landmark detection is powered by MediaPipe Tasks Vision from Google. Face recognition and expression detection use the vladmandic/face-api fork, which is an optimized version of face-api.js with the FaceRecognitionNet architecture originally from the face-recognition.js project. Facial landmark indices follow the MediaPipe Face Mesh topology. The AI interview runs on the Cerebras Cloud platform using the Llama 3.1 8B model.
+
+---
+
+## License
+
+MIT License. Use and modify freely.
