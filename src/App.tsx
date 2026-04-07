@@ -26,7 +26,33 @@ import {
   createHybridFeatures,
   detectExpressions
 } from './recognition/faceRecognition';
-import { Landmark, EmotionLabel, Prediction, RegisteredFace, FaceRecognitionResult, ExpressionResult } from './types';
+import {
+  initCerebrasAgent,
+  isAgentInitialized,
+  generateProbingQuestions,
+  generateFollowUpQuestion,
+  analyzeResponses,
+  exportReport
+} from './ai/cerebrasAgent';
+import { downloadMetricsChart } from './charts/metricsChart';
+import {
+  initSpeechRecognition,
+  startListening,
+  stopListening,
+  isCurrentlyListening,
+  isSpeechRecognitionSupported
+} from './audio/speechRecognition';
+import { 
+  Landmark, 
+  EmotionLabel, 
+  Prediction, 
+  RegisteredFace, 
+  FaceRecognitionResult, 
+  ExpressionResult,
+  AgentSession,
+  UserResponse,
+  InteractionReport
+} from './types';
 import './App.css';
 
 const EMOTIONS: EmotionLabel[] = ['Neutral', 'Happy', 'Angry', 'Sad', 'Surprise', 'Fear', 'Disgust'];
@@ -83,6 +109,17 @@ function App() {
   const emotionStableCount = useRef<number>(0);
   const lastPromptTime = useRef<number>(0);
   const interactiveTrainCount = useRef<number>(0);
+  
+  // Agentic interview state
+  const [agentSession, setAgentSession] = useState<AgentSession | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<string>('');
+  const [userInput, setUserInput] = useState<string>('');
+  const [isListening, setIsListening] = useState(false);
+  const [cerebrasApiKey, setCerebrasApiKey] = useState<string>('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [emotionalHistory, setEmotionalHistory] = useState<{ timestamp: number; emotion: EmotionLabel; confidence: number }[]>([]);
+  const [generatedReport, setGeneratedReport] = useState<InteractionReport | null>(null);
+  const [showReport, setShowReport] = useState(false);
 
   // Initialize
   useEffect(() => {
@@ -97,6 +134,12 @@ function App() {
         // Initialize face recognition
         await initFaceRecognition();
         setRecognitionReady(true);
+        
+        // Initialize speech recognition
+        const speechSupported = initSpeechRecognition();
+        if (!speechSupported) {
+          console.warn('Speech recognition not available');
+        }
         
         // Load registered faces
         const savedFaces = await loadRegisteredFaces();
@@ -485,6 +528,178 @@ function App() {
     }
     
     setPromptedEmotion(null);
+  };
+  
+  // Start agentic interview session
+  const startAgenticInterview = async () => {
+    if (!isAgentInitialized()) {
+      setShowApiKeyInput(true);
+      return;
+    }
+    
+    try {
+      const questions = await generateProbingQuestions('Emotional assessment session');
+      const session: AgentSession = {
+        id: `session_${Date.now()}`,
+        active: true,
+        questionIndex: 0,
+        questions,
+        responses: [],
+        startTime: Date.now()
+      };
+      
+      setAgentSession(session);
+      setCurrentQuestion(questions[0]?.question || '');
+      setEmotionalHistory([]);
+    } catch (err) {
+      setError(`Failed to start interview: ${err}`);
+    }
+  };
+  
+  // Submit response to current question
+  const submitResponse = async () => {
+    if (!agentSession || !userInput.trim() || !pretrainedExpression) return;
+    
+    const currentQ = agentSession.questions[agentSession.questionIndex];
+    if (!currentQ) return;
+    
+    // Capture image data from canvas
+    let imageData: string | undefined;
+    if (canvasRef.current) {
+      imageData = canvasRef.current.toDataURL('image/jpeg', 0.8);
+    }
+    
+    const response: UserResponse = {
+      questionId: currentQ.id,
+      question: currentQ.question,
+      response: userInput,
+      timestamp: Date.now(),
+      emotion: pretrainedExpression.dominantEmotion,
+      emotionConfidence: pretrainedExpression.confidence,
+      facialTension: tensionScore,
+      imageData
+    };
+    
+    const updatedResponses = [...agentSession.responses, response];
+    
+    // Track emotional journey
+    setEmotionalHistory(prev => [...prev, {
+      timestamp: Date.now(),
+      emotion: pretrainedExpression.dominantEmotion,
+      confidence: pretrainedExpression.confidence
+    }]);
+    
+    // Check if we should ask a follow-up
+    let shouldFollowUp = false;
+    if (prediction && prediction.label !== pretrainedExpression.dominantEmotion) {
+      shouldFollowUp = true; // Emotional inconsistency
+    }
+    
+    if (shouldFollowUp && agentSession.questionIndex < agentSession.questions.length - 1) {
+      const followUp = await generateFollowUpQuestion(response, updatedResponses);
+      if (followUp) {
+        const updatedQuestions = [...agentSession.questions];
+        updatedQuestions.splice(agentSession.questionIndex + 1, 0, followUp);
+        setAgentSession({
+          ...agentSession,
+          questions: updatedQuestions,
+          responses: updatedResponses,
+          questionIndex: agentSession.questionIndex + 1
+        });
+        setCurrentQuestion(followUp.question);
+        setUserInput('');
+        return;
+      }
+    }
+    
+    // Move to next question or finish
+    const nextIndex = agentSession.questionIndex + 1;
+    if (nextIndex < agentSession.questions.length) {
+      setAgentSession({
+        ...agentSession,
+        responses: updatedResponses,
+        questionIndex: nextIndex
+      });
+      setCurrentQuestion(agentSession.questions[nextIndex].question);
+      setUserInput('');
+    } else {
+      // Session complete - generate report
+      await finishInterview(updatedResponses);
+    }
+  };
+  
+  // Finish interview and generate report
+  const finishInterview = async (responses: UserResponse[]) => {
+    if (!agentSession) return;
+    
+    try {
+      const report = await analyzeResponses(
+        agentSession.id,
+        responses,
+        emotionalHistory
+      );
+      
+      setGeneratedReport(report);
+      setShowReport(true);
+      setAgentSession(null);
+      setCurrentQuestion('');
+      setUserInput('');
+    } catch (err) {
+      setError(`Failed to generate report: ${err}`);
+    }
+  };
+  
+  // Toggle voice input
+  const toggleVoiceInput = async () => {
+    if (!isSpeechRecognitionSupported()) {
+      setError('Speech recognition not supported in this browser');
+      return;
+    }
+    
+    if (isListening) {
+      stopListening();
+      setIsListening(false);
+    } else {
+      try {
+        setIsListening(true);
+        const transcript = await startListening();
+        setUserInput(prev => prev + ' ' + transcript);
+        setIsListening(false);
+      } catch (err) {
+        setError(`Speech recognition error: ${err}`);
+        setIsListening(false);
+      }
+    }
+  };
+  
+  // Initialize Cerebras with API key
+  const initializeCerebras = () => {
+    if (!cerebrasApiKey.trim()) {
+      setError('Please enter a Cerebras API key');
+      return;
+    }
+    
+    try {
+      initCerebrasAgent(cerebrasApiKey);
+      setShowApiKeyInput(false);
+      startAgenticInterview();
+    } catch (err) {
+      setError(`Failed to initialize Cerebras: ${err}`);
+    }
+  };
+  
+  // Export report as JSON
+  const downloadReport = () => {
+    if (!generatedReport) return;
+    
+    const jsonString = exportReport(generatedReport);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `interview-report-${generatedReport.sessionId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Register face
@@ -920,6 +1135,37 @@ function App() {
           </div>
 
           <div className="stats-panel">
+            <h2>AI Interview Agent</h2>
+            {!isAgentInitialized() ? (
+              <div className="agent-setup">
+                <p className="info">Start an AI-powered interview session</p>
+                <button onClick={startAgenticInterview} className="agent-start-btn">
+                  🤖 Start AI Interview
+                </button>
+              </div>
+            ) : agentSession ? (
+              <div className="agent-active">
+                <div className="agent-progress">
+                  Question {agentSession.questionIndex + 1} of {agentSession.questions.length}
+                </div>
+                <div className="agent-question">{currentQuestion}</div>
+              </div>
+            ) : (
+              <div className="agent-ready">
+                <p className="info">AI Agent Ready</p>
+                <button onClick={startAgenticInterview} className="agent-start-btn">
+                  🤖 Start New Interview
+                </button>
+                {generatedReport && (
+                  <button onClick={() => setShowReport(true)} className="view-report-btn">
+                    📊 View Last Report
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="stats-panel">
             <h2>Data Management</h2>
             <div className="data-controls">
               <button onClick={handleExport}>Export Data</button>
@@ -949,6 +1195,186 @@ function App() {
           )}
         </div>
       </div>
+      
+      {/* Agentic Interview Modal */}
+      {agentSession && (
+        <div className="agent-modal-overlay">
+          <div className="agent-modal">
+            <div className="agent-modal-header">
+              <h2>AI Interview Session</h2>
+              <div className="agent-emotion-indicator">
+                Current Emotion: <strong>{pretrainedExpression?.dominantEmotion || '...'}</strong>
+                {pretrainedExpression && (
+                  <span className="emotion-icon">
+                    {pretrainedExpression.dominantEmotion === 'Happy' && '😊'}
+                    {pretrainedExpression.dominantEmotion === 'Sad' && '😢'}
+                    {pretrainedExpression.dominantEmotion === 'Angry' && '😠'}
+                    {pretrainedExpression.dominantEmotion === 'Surprise' && '😲'}
+                    {pretrainedExpression.dominantEmotion === 'Fear' && '😨'}
+                    {pretrainedExpression.dominantEmotion === 'Disgust' && '🤢'}
+                    {pretrainedExpression.dominantEmotion === 'Neutral' && '😐'}
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            <div className="agent-modal-body">
+              <div className="agent-question-display">
+                <p className="question-number">
+                  Question {agentSession.questionIndex + 1} of {agentSession.questions.length}
+                </p>
+                <h3>{currentQuestion}</h3>
+              </div>
+              
+              <div className="agent-response-area">
+                <textarea
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="Type your response here..."
+                  rows={4}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.ctrlKey) {
+                      submitResponse();
+                    }
+                  }}
+                />
+                <div className="agent-input-controls">
+                  <button 
+                    onClick={toggleVoiceInput}
+                    className={`voice-btn ${isListening ? 'listening' : ''}`}
+                    disabled={!isSpeechRecognitionSupported()}
+                  >
+                    {isListening ? '🔴 Listening...' : '🎤 Voice'}
+                  </button>
+                  <button 
+                    onClick={submitResponse}
+                    className="submit-btn"
+                    disabled={!userInput.trim()}
+                  >
+                    Submit (Ctrl+Enter)
+                  </button>
+                </div>
+              </div>
+              
+              <div className="agent-context">
+                <div className="context-item">
+                  <strong>Tension:</strong> {tensionScore.toFixed(1)}
+                </div>
+                <div className="context-item">
+                  <strong>Confidence:</strong> {((pretrainedExpression?.confidence || 0) * 100).toFixed(0)}%
+                </div>
+                <div className="context-item">
+                  <strong>Responses:</strong> {agentSession.responses.length}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* API Key Input Modal */}
+      {showApiKeyInput && (
+        <div className="agent-modal-overlay">
+          <div className="api-key-modal">
+            <h2>Setup Cerebras AI Agent</h2>
+            <p>Enter your Cerebras API key to enable AI-powered interviews</p>
+            <input
+              type="password"
+              value={cerebrasApiKey}
+              onChange={(e) => setCerebrasApiKey(e.target.value)}
+              placeholder="Enter Cerebras API key"
+              onKeyDown={(e) => e.key === 'Enter' && initializeCerebras()}
+            />
+            <div className="api-key-actions">
+              <button onClick={initializeCerebras}>Initialize</button>
+              <button onClick={() => setShowApiKeyInput(false)}>Cancel</button>
+            </div>
+            <p className="api-key-help">
+              Get your API key from <a href="https://cloud.cerebras.ai" target="_blank" rel="noopener noreferrer">cloud.cerebras.ai</a>
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {/* Report Modal */}
+      {showReport && generatedReport && (
+        <div className="agent-modal-overlay">
+          <div className="report-modal">
+            <div className="report-header">
+              <h2>📊 Interview Analysis Report</h2>
+              <button onClick={() => setShowReport(false)} className="close-btn">×</button>
+            </div>
+            
+            <div className="report-body">
+              <div className="report-section">
+                <h3>Session Summary</h3>
+                <p>{generatedReport.summary}</p>
+              </div>
+              
+              <div className="report-section">
+                <h3>Key Insights</h3>
+                <div className="insights-grid">
+                  <div className="insight-card">
+                    <div className="insight-label">Dominant Emotion</div>
+                    <div className="insight-value">{generatedReport.insights.dominantEmotion}</div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-label">Emotional Stability</div>
+                    <div className="insight-value">{(generatedReport.insights.emotionalStability * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-label">Stress Level</div>
+                    <div className="insight-value">{(generatedReport.insights.stressLevel * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="insight-card">
+                    <div className="insight-label">Authenticity</div>
+                    <div className="insight-value">{(generatedReport.insights.authenticity * 100).toFixed(0)}%</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="report-section">
+                <h3>Key Findings</h3>
+                <ul>
+                  {generatedReport.insights.keyFindings.map((finding, i) => (
+                    <li key={i}>{finding}</li>
+                  ))}
+                </ul>
+              </div>
+              
+              <div className="report-section">
+                <h3>Recommendations</h3>
+                <ul>
+                  {generatedReport.insights.recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+              
+              <div className="report-section">
+                <h3>Emotional Journey</h3>
+                <div className="emotion-timeline">
+                  {generatedReport.emotionalJourney.map((entry, i) => (
+                    <div key={i} className="timeline-entry">
+                      <span className="timeline-emotion">{entry.emotion}</span>
+                      <span className="timeline-confidence">{(entry.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="report-actions">
+                <button onClick={downloadReport} className="download-btn">
+                  💾 Download JSON Report
+                </button>
+                <button onClick={() => downloadMetricsChart(generatedReport)} className="download-btn">
+                  📊 Download Metrics Graph
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Interactive Training Prompt */}
       {showEmotionPrompt && promptedEmotion && (

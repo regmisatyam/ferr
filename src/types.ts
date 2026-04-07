@@ -72,3 +72,52 @@ export interface ExpressionResult {
   confidence: number;
 }
 
+export interface AgenticQuestion {
+  id: string;
+  question: string;
+  type: 'open' | 'yesno' | 'scale' | 'choice';
+  options?: string[];
+  followUp?: boolean;
+}
+
+export interface UserResponse {
+  questionId: string;
+  question: string;
+  response: string;
+  timestamp: number;
+  emotion: EmotionLabel;
+  emotionConfidence: number;
+  facialTension: number;
+  imageData?: string;
+  audioTranscript?: string;
+}
+
+export interface InteractionReport {
+  sessionId: string;
+  startTime: number;
+  endTime: number;
+  responses: UserResponse[];
+  emotionalJourney: {
+    timestamp: number;
+    emotion: EmotionLabel;
+    confidence: number;
+  }[];
+  insights: {
+    dominantEmotion: EmotionLabel;
+    emotionalStability: number;
+    stressLevel: number;
+    authenticity: number;
+    keyFindings: string[];
+    recommendations: string[];
+  };
+  summary: string;
+}
+
+export interface AgentSession {
+  id: string;
+  active: boolean;
+  questionIndex: number;
+  questions: AgenticQuestion[];
+  responses: UserResponse[];
+  startTime: number;
+}
